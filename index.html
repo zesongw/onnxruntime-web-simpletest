@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Document</title>
+</head>
+
+<body>
+    <button onclick="trans" id="start">start</button>
+    <script src="./onnxruntime-web/dist/ort.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@petamoriken/float16@3.8.0/browser/float16.min.js"></script>
+    <script>
+        ort.env.wasm.simd = false
+        ort.env.wasm.proxy = true
+        ort.env.wasm.numThreads = 0
+
+        function float16to32(arr) {
+            var arr32 = new Float32Array(arr.length);
+            for (var i = 0; i < arr.length; i++) {
+                arr32[i] = arr[i]
+            }
+            return arr32;
+        }
+
+        // Run float32 model
+        async function run(message) {
+            let model_path = message[0];
+            let input = message[1];
+            let output = message[2];
+            let dim = message[3];
+            var feeds = {}
+            var feeds1 = {}
+            const genRandomArr = (num) =>
+                Array.from({ length: num }, (v, k) => Math.random());
+            if (typeof input == 'object') {
+                for (let index = 0; index < input.length; index++) {
+                    const element = input[index];
+                    const dim_ = dim[index]
+                    inputTensor = new ort.Tensor(
+                        "float32",
+                        new Float32Array(genRandomArr(dim_.reduce((pre, cur) => pre * cur))),
+                        dim_
+                    );
+                    inputTensor1 = new ort.Tensor(
+                        "float32",
+                        new Float32Array(inputTensor["data"]),
+                        dim_
+                    );
+                    feeds[element] = inputTensor
+                    feeds1[element] = inputTensor1
+                    console.log("input", inputTensor)
+                }
+            } else {
+                inputTensor = new ort.Tensor(
+                    "float32",
+                    new Float32Array(genRandomArr(dim.reduce((pre, cur) => pre * cur))),
+                    dim
+                );
+                inputTensor1 = new ort.Tensor(
+                    "float32",
+                    new Float32Array(inputTensor["data"]),
+                    dim
+                );
+                feeds = { [input]: inputTensor };
+                feeds1 = { [input]: inputTensor1 };
+                console.log("input", feeds1);
+            }
+            session = await await ort.InferenceSession.create(model_path, {
+                executionProviders: [{ name: "cpu", deviceType: 1, powerPreference: 1 }],
+                logSeverityLevel: 0,
+            });
+            session_webnn = await ort.InferenceSession.create(model_path, {
+                executionProviders: [{ name: "webnn", deviceType: 'gpu', powerPreference: 'default' }],
+                logSeverityLevel: 0,
+            });
+
+            const results = await session.run(feeds);
+            const results_webnn = await session_webnn.run(feeds1);
+
+            console.log("finished run for", message[0]);
+            if (typeof output == 'object') {
+                for (const key in output) {
+                    result1 = results[output[key]].data;
+                    result2 = new Float32Array(results_webnn[output[key]].data);
+                    let epsilon = 2e-5;
+                    difference = result1.map((x, i) => Math.abs(x - result2[i]))
+                    testResult = result1.every((x, i) => Math.abs(x - result2[i]) < epsilon);
+                    console.assert(testResult, result1, result2, difference, difference.sort())
+                    console.log(result1.map((x, i) => x - result2[i]).sort());
+                }
+            } else {
+                result1 = results[output].data;
+                result2 = results_webnn[output].data;
+                let epsilon = 2e-5;
+                difference = result1.map((x, i) => Math.abs(x - result2[i]))
+                testResult = difference.every((x) => x < epsilon);
+                console.assert(testResult, result1, result2, testResult, difference.sort())
+                console.log(result1, result2)
+            }
+        };
+
+        // Run float16 model
+        async function run16(message) {
+            let model_path = message[0];
+            let input = message[1];
+            let output = message[2];
+            let dim = message[3];
+            var feeds = {}
+            var feeds1 = {}
+            const genRandomArr = (num) =>
+                new float16.Float16Array(Array.from({ length: num }, () => 1.1)).buffer;
+            // Multiple inputs
+            if (typeof input == 'object') {
+                for (let index = 0; index < input.length; index++) {
+                    const element = input[index];
+                    const dim_ = dim[index]
+                    inputTensor = new ort.Tensor(
+                        "float16",
+                        new Uint16Array(genRandomArr(dim_.reduce((pre, cur) => pre * cur))),
+                        dim_
+                    );
+                    // Deep copy for transferable
+                    inputTensor1 = new ort.Tensor(
+                        "float16",
+                        new Uint16Array(inputTensor["data"]),
+                        dim_
+                    );
+                    feeds[element] = inputTensor
+                    feeds1[element] = inputTensor1
+                    console.log("input", inputTensor)
+                }
+            } else {
+                inputTensor = new ort.Tensor(
+                    "float16",
+                    new Uint16Array(genRandomArr(dim.reduce((pre, cur) => pre * cur))),
+                    dim
+                );
+                inputTensor1 = new ort.Tensor(
+                    "float16",
+                    new Uint16Array(inputTensor["data"]),
+                    dim
+                );
+                feeds = { [input]: inputTensor };
+                feeds1 = { [input]: inputTensor1 };
+                console.log("input", feeds1);
+            }
+            session = await await ort.InferenceSession.create(model_path, {
+                executionProviders: [{ name: "cpu", deviceType: 1, powerPreference: 1 }],
+                logSeverityLevel: 0,
+            });
+            session_webnn = await ort.InferenceSession.create(model_path, {
+                executionProviders: [{ name: "webnn", deviceType: 'gpu', powerPreference: 'default' }],
+                logSeverityLevel: 0,
+            });
+
+            const results = await session.run(feeds);
+            const results_webnn = await session_webnn.run(feeds1);
+
+            console.log("finished run for", message[0]);
+            if (typeof output == 'object') {
+                for (const key in output) {
+                    result1 = results[output[key]].data;
+                    result2 = new Float32Array(results_webnn[output[key]].data);
+                    result1 = float16to32(new float16.Float16Array(result1))
+                    result2 = float16to32(new float16.Float16Array(result2))
+                    let epsilon = 2e-5;
+                    difference = result1.map((x, i) => Math.abs(x - result2[i]))
+                    testResult = result1.every((x, i) => Math.abs(x - result2[i]) < epsilon);
+                    console.assert(testResult, result1, result2, difference, difference.sort())
+                    console.log(result1.map((x, i) => x - result2[i]).sort());
+                }
+            } else {
+                result1 = results[output].data;
+                result2 = results_webnn[output].data;
+                result1 = float16to32(new float16.Float16Array(result1.buffer))
+                result2 = float16to32(new float16.Float16Array(result2.buffer))
+                let epsilon = 2e-5;
+                difference = result1.map((x, i) => Math.abs(x - result2[i]))
+                testResult = difference.every((x) => x < epsilon);
+                console.assert(testResult, result1, result2, testResult, difference.sort())
+                console.log(result1, result2)
+            }
+        };
+
+
+        async function main() {
+            await run16(["./models/add.float16.onnx", ["A", "B"], "output", [[1, 32, 64, 128], [1, 32, 64, 128]]])
+            await run16(["./models/conv.float16.onnx", "input", "output", [1, 8, 32, 32]])
+            await run(["./models/add.float32.onnx", ["A", "B"], "output", [[1, 32, 64, 128], [1, 32, 64, 128]]])
+            await run(["./models/conv.onnx", "X", "Y", [1, 3, 548, 548]])
+        }
+        main()
+    </script>
+
+</body>
+
+</html>
